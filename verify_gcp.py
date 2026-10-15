@@ -37,6 +37,27 @@ TOPIC = f"agent-runs-verify-{SUFFIX}"
 SUBSCRIPTION = f"agent-runs-verify-sub-{SUFFIX}"
 
 
+def _resolve_project(fallback: str | None) -> str | None:
+    """⚠️ Prefer something VALIDATED over something merely typed."""
+    import argparse, json, pathlib
+    ap = argparse.ArgumentParser(add_help=False)
+    ap.add_argument("--project")
+    known, _ = ap.parse_known_args()
+    if known.project:
+        return known.project
+    if os.environ.get("GOOGLE_CLOUD_PROJECT"):
+        return os.environ["GOOGLE_CLOUD_PROJECT"]
+    adc = pathlib.Path.home() / ".config/gcloud/application_default_credentials.json"
+    if adc.exists():
+        try:
+            qp = json.loads(adc.read_text()).get("quota_project_id")
+            if qp:
+                return qp
+        except Exception:
+            pass
+    return fallback
+
+
 def main() -> int:
     print("verify_gcp.py — a real Pub/Sub round trip\n")
 
@@ -53,9 +74,24 @@ def main() -> int:
         print("  ❌ pip install google-cloud-pubsub")
         return 2
 
-    creds, project = default()
+    # ⚠️⚠️ `default()` IS NOT ENOUGH, AND THIS COST A ROUND TRIP.
+    #
+    # It returns the project from the gcloud CLI's `core/project` -- which is just a
+    # NAME the user typed. `gcloud config set project gcp-agent-queue` sets it without
+    # checking that the project exists, and every API call then goes to a project that
+    # was never created.
+    #
+    # ⚠️ Measured: `default()` returned 'gcp-agent-queue' while the account's only real
+    # project was 'gcp-agent-queue-2610151616'. The calls failed with a 404 that reads
+    # like a permissions problem and is actually a wrong name.
+    #
+    # Resolution order, most explicit first: --project, GOOGLE_CLOUD_PROJECT, the ADC
+    # quota project (which is validated, because it had to be passed to a real API to be
+    # set), then default() as a last resort.
+    creds, fallback = default()
+    project = _resolve_project(fallback)
     if not project:
-        print("  ❌ no project resolved. Run: gcloud config set project YOUR_PROJECT_ID")
+        print("  ❌ no project resolved. Pass --project, or set GOOGLE_CLOUD_PROJECT")
         return 2
 
     print(f"  project    {project}")
