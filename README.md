@@ -56,7 +56,30 @@ Also enforced and tested:
 - **idempotence by `run_id`** — ⚠️ at-least-once is the transport's contract, not a setting, so the handler is keyed and the same message returns the same result
 - **a run with no id is refused at the door** — a run that cannot be de-duplicated cannot be made safe
 
-## ⚠️ What is NOT demonstrated: the queue
+## ✅ How to prove the transport on real GCP
+
+⚠️ The local emulator is **broken on this machine** — it detects HTTP/2 and then fails in
+its internal `TcpProxyHandler` with a broken pipe, so the round trip never completes. The
+Docker image route was abandoned: a ~2GB pull for something that is still an emulator.
+
+**The supported path is a real project, and it is quicker:**
+
+```bash
+gcloud auth application-default login
+gcloud config set project YOUR_PROJECT_ID
+pip install -r requirements.txt
+./run.sh verify          # publish -> deliver -> ack -> confirmed
+```
+
+`verify_gcp.py` prints each step as PASS/FAIL, so the output is the evidence. ⚠️ Its last
+step pulls *again* after acking and requires that **nothing comes back** — without it, the
+ack step proves only that an API call did not raise.
+
+⚠️ `agent_queue.py` needed **no changes** for this. It reads `GOOGLE_CLOUD_PROJECT` and
+only consults `PUBSUB_EMULATOR_HOST` when that is set, which is why an emulator run and a
+real run are the same code path.
+
+## ⚠️ What is NOT demonstrated: the queue against a live project
 
 The **emulator runs** — `cloud-pubsub-emulator` starts and listens on `127.0.0.1:8085` —
 and the **client library is installed**. But a publish from the Python client never
